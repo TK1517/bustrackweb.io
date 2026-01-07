@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Student - Track Bus</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <style>
+        body { margin: 0; font-family: 'Lato', sans-serif; background: #f4f7f6; }
+        #map { height: 100vh; width: 100vw; }
+        .info-card {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 400px; background: white; border-radius: 15px;
+            padding: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); z-index: 1000;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .eta-box { text-align: right; border-left: 1px solid #eee; padding-left: 15px; }
+        .status-badge { color: #27ae60; font-weight: bold; font-size: 12px; display: flex; align-items: center; gap: 5px; }
+    </style>
+</head>
+<body>
+
+    <div class="info-card">
+        <div>
+            <div id="route-display" style="font-weight: bold; fontSize: 16px;">Fetching Route...</div>
+            <div class="status-badge"><span style="height:8px; width:8px; background:#27ae60; border-radius:50%"></span> Arriving in <span id="duration-text">--</span></div>
+        </div>
+        <div class="eta-box">
+            <div style="color: gray; font-size: 11px;">ETA</div>
+            <div id="eta-text" style="font-size: 22px; font-weight: bold;">--:--</div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyAowbLGRLTAhhee3Q_JM6AnmcwPojkh8Gs",
+            authDomain: "bustrack-6c4fb.firebaseapp.com",
+            projectId: "bustrack-6c4fb",
+            storageBucket: "bustrack-6c4fb.firebasestorage.app",
+            messagingSenderId: "565786599176",
+            appId: "1:565786599176:web:600e5e01b4c6e31bc196bd"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        const params = new URLSearchParams(window.location.search);
+        const busId = params.get('busId');
+
+        // Initialize Map
+        let map = L.map('map').setView([13.0827, 80.2707], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        
+        let busMarker = L.marker([0,0], {
+            icon: L.divIcon({ html: '🚌', className: 'bus-emoji', iconSize: [30, 30] })
+        }).addTo(map);
+        
+        let routeLine = L.polyline([], {color: 'blue', weight: 5}).addTo(map);
+        let hasCentered = false;
+        let lastRouteKey = "";
+
+        // Listen to Live Updates
+        db.collection('activeRides').doc(busId).onSnapshot(doc => {
+            if (!doc.exists) {
+                alert("Bus has stopped the ride.");
+                window.location.href = 'index.html';
+                return;
+            }
+
+            const data = doc.data();
+            const busPos = [data.latitude, data.longitude];
+
+            // Update UI
+            document.getElementById('route-display').innerText = `${data.start} ➔ ${data.end}`;
+            document.getElementById('eta-text').innerText = data.eta || '--:--';
+            document.getElementById('duration-text').innerText = data.duration || '-- mins';
+
+            // Update Marker
+            busMarker.setLatLng(busPos);
+
+            // Auto-center once
+            if (!hasCentered) {
+                map.setView(busPos, 15);
+                hasCentered = true;
+            }
+
+            // Load Route Line if changed
+            const currentKey = `${data.start}|${data.end}`;
+            if (lastRouteKey !== currentKey) {
+                loadRoute(data.start, data.end);
+                lastRouteKey = currentKey;
+            }
+        });
+
+        async function loadRoute(start, end) {
+            const startCoords = await getCoords(start);
+            const endCoords = await getCoords(end);
+            if (!startCoords || !endCoords) return;
+
+            const res = await fetch(`http://router.project-osrm.org/route/v1/driving/${startCoords[1]},${startCoords[0]};${endCoords[1]},${endCoords[0]}?overview=full&geometries=geojson`);
+            const data = await res.json();
+            const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+            routeLine.setLatLngs(coords);
+        }
+
+        async function getCoords(place) {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${place}, India&limit=1`);
+            const data = await res.json();
+            return data.length > 0 ? [data[0].lat, data[0].lon] : null;
+        }
+    </script>
+</body>
+</html>

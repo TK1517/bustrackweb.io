@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route Selection - Bus Tracker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        body {
+            font-family: 'Lato', sans-serif;
+            margin: 0;
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+
+        .container { width: 90%; max-width: 500px; text-align: center; }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 30px;
+            padding: 25px;
+            margin-bottom: 20px;
+            color: #333;
+            text-align: left;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        /* Glassmorphism/Blur Logic */
+        .blurred { 
+            filter: blur(5px); 
+            opacity: 0.5; 
+            pointer-events: none; 
+            user-select: none; 
+        }
+
+        h2, h3 { margin-top: 0; }
+        label { font-weight: bold; color: #11998e; font-size: 14px; }
+        
+        select {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0 20px 0;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+            background: #f9f9f9;
+            font-size: 16px;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border-radius: 12px;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 16px;
+            transition: 0.2s;
+        }
+
+        .btn:active { transform: scale(0.98); }
+
+        .primary-btn { background: #ffdd57; color: #000; }
+        .stop-btn { background: #ff5252; color: white; }
+        .continue-btn { background: #448aff; color: white; }
+
+        .back-link { color: white; text-decoration: none; display: block; margin-top: 20px; opacity: 0.8; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header style="margin-bottom: 30px;">
+            <div style="font-size: 50px;">🚌</div>
+            <h2 id="display-bus-num">Bus --</h2>
+            <p style="opacity: 0.9;">Driver Control Panel</p>
+        </header>
+
+        <div id="config-section" class="card">
+            <h3>📍 Start New Ride</h3>
+            <label>Starting Point</label>
+            <select id="start-stop"><option>Loading stops...</option></select>
+            
+            <label>Destination</label>
+            <select id="end-stop"><option>Loading stops...</option></select>
+            
+            <button class="btn primary-btn" onclick="handleStartRide()">🚀 START RIDE & OPEN MAP</button>
+        </div>
+
+        <div id="active-section" class="card blurred">
+            <h3 style="color: #2ecc71;">📡 Live Tracking Active</h3>
+            <p id="route-text" style="color: #666; font-weight: bold; font-size: 18px;">None</p>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn continue-btn" onclick="handleContinueRide()">CONTINUE MAP</button>
+                <button class="btn stop-btn" onclick="handleStopRide()">STOP RIDE</button>
+            </div>
+        </div>
+
+        <a href="index.html" class="back-link">← Back to Fleet List</a>
+    </div>
+
+    <script>
+        // 1. Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyAowbLGRLTAhhee3Q_JM6AnmcwPojkh8Gs",
+            authDomain: "bustrack-6c4fb.firebaseapp.com",
+            projectId: "bustrack-6c4fb",
+            storageBucket: "bustrack-6c4fb.firebasestorage.app",
+            messagingSenderId: "565786599176",
+            appId: "1:565786599176:web:600e5e01b4c6e31bc196bd"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // 2. Get Bus Identity from URL
+        const params = new URLSearchParams(window.location.search);
+        const busId = params.get('busId');
+        const busNum = params.get('busNum');
+
+        document.getElementById('display-bus-num').innerText = "Bus " + busNum;
+
+        // Variables to hold active route state
+        let currentStart = "";
+        let currentEnd = "";
+
+        // 3. Load Available Stops from Firestore
+        db.collection('bus_stops').get().then(snap => {
+            const options = snap.docs.map(doc => `<option value="${doc.data().name}">${doc.data().name}</option>`).join('');
+            document.getElementById('start-stop').innerHTML = options;
+            document.getElementById('end-stop').innerHTML = options;
+        });
+
+        // 4. Real-time Status Monitor (Replica of StreamBuilder)
+        db.collection('buses').doc(busId).onSnapshot(doc => {
+            const data = doc.data();
+            const isActive = data && data.status === 'active';
+
+            if (isActive) {
+                currentStart = data.startLocation;
+                currentEnd = data.endLocation;
+                document.getElementById('config-section').classList.add('blurred');
+                document.getElementById('active-section').classList.remove('blurred');
+                document.getElementById('route-text').innerText = `${currentStart} ➔ ${currentEnd}`;
+            } else {
+                document.getElementById('config-section').classList.remove('blurred');
+                document.getElementById('active-section').classList.add('blurred');
+                document.getElementById('route-text').innerText = "Inactive";
+            }
+        });
+
+        // ACTION: Start Ride
+        async function handleStartRide() {
+            const start = document.getElementById('start-stop').value;
+            const end = document.getElementById('end-stop').value;
+            
+            // Set status to active in Firestore
+            await db.collection('buses').doc(busId).set({
+                busNumber: busNum,
+                status: 'active',
+                startLocation: start,
+                endLocation: end,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+
+            // Jump to map
+            window.location.href = `driver_map.html?busId=${busId}&start=${start}&end=${end}`;
+        }
+
+        // ACTION: Continue to Map
+        function handleContinueRide() {
+            if(currentStart && currentEnd) {
+                window.location.href = `driver_map.html?busId=${busId}&start=${currentStart}&end=${currentEnd}`;
+            }
+        }
+
+        // ACTION: Stop Ride & Cut Connection
+        async function handleStopRide() {
+            if(confirm("Stop this ride? This will disconnect live tracking for all students.")) {
+                // 1. Set status to inactive
+                await db.collection('buses').doc(busId).update({ status: 'inactive' });
+                
+                // 2. Remove from active rides collection (the "cut")
+                await db.collection('activeRides').doc(busId).delete();
+                
+                alert("Ride stopped. Connection cut.");
+            }
+        }
+    </script>
+</body>
+</html>

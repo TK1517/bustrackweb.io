@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bus Tracker Web Portal</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        :root {
+            --role-bg: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --driver-bg: linear-gradient(135deg, #4b2b6f 0%, #8b2f6b 100%);
+            --student-bg: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            --glass: rgba(255, 255, 255, 0.18);
+        }
+
+        body {
+            font-family: 'Lato', sans-serif;
+            margin: 0;
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: var(--role-bg);
+            transition: background 0.5s ease;
+        }
+
+        .glass-card {
+            background: var(--glass);
+            backdrop-filter: blur(10px);
+            border-radius: 22px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.35);
+            padding: 40px;
+            text-align: center;
+            width: 90%;
+            max-width: 450px;
+        }
+
+        .role-container { display: flex; gap: 20px; justify-content: center; margin-top: 30px; }
+        
+        .role-btn {
+            background: var(--glass);
+            padding: 20px;
+            border-radius: 15px;
+            cursor: pointer;
+            transition: transform 0.3s;
+            border: 1px solid rgba(255,255,255,0.1);
+            flex: 1;
+        }
+
+        .role-btn:hover { transform: translateY(-5px); background: rgba(255,255,255,0.3); }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid white;
+            color: white;
+            outline: none;
+        }
+
+        button.primary-btn {
+            background: #ffdd57;
+            color: #5a2d82;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 30px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        .hidden { display: none; }
+        
+        .bus-item {
+            background: rgba(255,255,255,0.15);
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            text-align: left;
+            transition: 0.2s;
+        }
+        .bus-item:hover { background: rgba(255,255,255,0.25); }
+
+        .live-indicator {
+            color: #38ef7d;
+            font-weight: bold;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .dot { height: 8px; width: 8px; background-color: #38ef7d; border-radius: 50%; display: inline-block; }
+    </style>
+</head>
+<body>
+
+    <div id="role-screen" class="glass-card">
+        <h1>Welcome 🚍</h1>
+        <p>Select an option to continue</p>
+        <div class="role-container">
+            <div class="role-btn" onclick="showDriverLogin()">
+                <h3>Driver</h3>
+                <small>Staff Login</small>
+            </div>
+            <div class="role-btn" onclick="showStudentDashboard()">
+                <h3>Student</h3>
+                <small>Track Live Buses</small>
+            </div>
+        </div>
+    </div>
+
+    <div id="login-screen" class="glass-card hidden">
+        <h2>🚍 Driver Login</h2>
+        <input type="email" id="email" placeholder="Email">
+        <input type="password" id="password" placeholder="Password">
+        <button class="primary-btn" onclick="handleDriverLogin()">Login</button>
+        <p id="error-msg" style="color: #ffbaba; font-size: 13px;"></p>
+        <button onclick="goBack()" style="background:none; border:none; color:white; cursor:pointer; margin-top:10px;">← Back</button>
+    </div>
+
+    <div id="dashboard" class="glass-card hidden">
+        <h2 id="dash-title">Buses</h2>
+        <div id="bus-list"></div>
+        <div id="driver-controls" class="hidden">
+            <button class="primary-btn" onclick="addBus()">+ Add Bus</button>
+        </div>
+        <button onclick="goBack()" style="background:none; border:none; color:white; cursor:pointer; margin-top:20px;">Return Home</button>
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyAowbLGRLTAhhee3Q_JM6AnmcwPojkh8Gs",
+            authDomain: "bustrack-6c4fb.firebaseapp.com",
+            projectId: "bustrack-6c4fb",
+            storageBucket: "bustrack-6c4fb.firebasestorage.app",
+            messagingSenderId: "565786599176",
+            appId: "1:565786599176:web:600e5e01b4c6e31bc196bd"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // Navigation
+        function goBack() {
+            location.reload(); // Simplest way to reset state
+        }
+
+        // --- DRIVER LOGIC ---
+        function showDriverLogin() {
+            document.body.style.background = 'var(--driver-bg)';
+            document.getElementById('role-screen').classList.add('hidden');
+            document.getElementById('login-screen').classList.remove('hidden');
+        }
+
+        async function handleDriverLogin() {
+            const email = document.getElementById('email').value;
+            const pass = document.getElementById('password').value;
+            try {
+                const user = await auth.signInWithEmailAndPassword(email, pass);
+                loadDriverBuses(user.user.uid);
+            } catch (e) {
+                document.getElementById('error-msg').innerText = e.message;
+            }
+        }
+
+        function loadDriverBuses(uid) {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            document.getElementById('driver-controls').classList.remove('hidden');
+            document.getElementById('dash-title').innerText = "My Fleet";
+
+            db.collection('drivers').doc(uid).collection('buses').orderBy('createdAt', 'desc')
+                .onSnapshot(snap => {
+                    const list = document.getElementById('bus-list');
+                    list.innerHTML = '';
+                    snap.forEach(doc => {
+                        const b = doc.data();
+                        list.innerHTML += `
+                            <div class="bus-item" onclick="window.location.href='route_selection.html?busId=${b.busId}&busNum=${b.busNumber}'">
+                                <div><strong>Bus ${b.busNumber}</strong><br><small>${b.busId}</small></div>
+                                <span>➔</span>
+                            </div>`;
+                    });
+                });
+        }
+
+        async function addBus() {
+            const busNum = prompt("Enter Bus Number:");
+            const busId = prompt("Enter Bus ID:");
+            if(busNum && busId) {
+                await db.collection('drivers').doc(auth.currentUser.uid).collection('buses').add({
+                    busNumber: busNum,
+                    busId: busId.toUpperCase(),
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        }
+
+       // --- STUDENT LOGIC (Direct Access) ---
+function showStudentDashboard() {
+    // 1. Apply the background class from your merged CSS
+    document.body.classList.add('student-bg');
+    
+    // 2. UI Switching
+    document.getElementById('role-screen').classList.add('hidden');
+    
+    // Ensure this ID matches your HTML (using 'dashboard' as the main container)
+    const dash = document.getElementById('dashboard');
+    dash.classList.remove('hidden');
+    document.getElementById('dash-title').innerText = "Active Buses";
+
+    // 3. Listen to activeRides collection directly
+    db.collection('activeRides').onSnapshot(snap => {
+        const list = document.getElementById('bus-list');
+        list.innerHTML = '';
+        
+        if (snap.empty) {
+            list.innerHTML = '<p style="opacity:0.6; padding: 20px;">No buses are currently on the road.</p>';
+            return;
+        }
+
+        snap.forEach(doc => {
+            const ride = doc.data();
+            // Using the bus-row class from your merged CSS for consistent styling
+            list.innerHTML += `
+                <div class="bus-row" onclick="window.location.href='student_map.html?busId=${doc.id}'" style="cursor: pointer;">
+                    <div class="bus-number">🚌</div>
+                    <div class="bus-name">
+                        <strong>${ride.start || 'Unknown'} ➔ ${ride.end || 'Destination'}</strong><br>
+                        <small style="opacity: 0.8;">ID: ${doc.id}</small>
+                    </div>
+                    <div class="live-indicator" style="color: #38ef7d; font-weight: bold; font-size: 12px;">
+                        <span class="dot"></span> LIVE
+                    </div>
+                </div>`;
+        });
+    }, error => {
+        console.error("Firestore Error:", error);
+        alert("Permission denied or database error.");
+    });
+}
+    </script>
+</body>
+</html>
